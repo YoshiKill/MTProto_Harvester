@@ -14,8 +14,6 @@
 
 https://www.donationalerts.com/r/hdd40gb
 
-🤙 Потужно пердякнути
-
 https://next.privat24.ua/send/ggbi5
 ---
 
