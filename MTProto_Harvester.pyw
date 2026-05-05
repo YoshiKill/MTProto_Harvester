@@ -13,11 +13,16 @@ MATRIX_LOW_GREEN = "#002200"
 MATRIX_HOVER = "#005F00"
 TEXT_COLOR = "#D1FFD6"
 
+# Цвета для скопированных элементов
+COPIED_BG = "#550000"     # Темно-красный фон
+COPIED_HOVER = "#770000"  # Красный фон при наведении
+COPIED_TEXT = "#FF8888"   # Светло-красный текст
+
 class MTProtoApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("MTproto_Harvester")
+        self.title("Mproto_Harvester")
         self.geometry("850x750")
         self.configure(fg_color=MATRIX_DARK)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -214,12 +219,21 @@ class MTProtoApp(ctk.CTk):
             self.log(f"[-] ERROR: {server}:{port} - {str(e)}")
             return None
 
-    def copy_to_clipboard(self, text_to_copy, item_type):
-        """Копирует переданный текст и показывает уведомление"""
+    def copy_to_clipboard(self, text_to_copy, item_type, widget=None):
+        """Копирует переданный текст, показывает уведомление и красит кнопку в красный"""
         self.clipboard_clear()
         self.clipboard_append(str(text_to_copy))
         self.copy_notify.configure(text=f"[ {item_type} SECURED IN CLIPBOARD ]", text_color=MATRIX_GREEN)
         self.after(2000, lambda: self.copy_notify.configure(text=""))
+        
+        # Если передана кнопка, меняем её цвет на красный (маркируем как скопированную)
+        if widget:
+            widget.configure(
+                fg_color=COPIED_BG,
+                hover_color=COPIED_HOVER,
+                text_color=COPIED_TEXT,
+                border_color=COPIED_HOVER
+            )
 
     def add_proxy_widget(self, proxy):
         """Добавляет рабочий прокси в UI-список с раздельными колонками"""
@@ -243,9 +257,10 @@ class MTProtoApp(ctk.CTk):
             border_width=1,
             text_color=TEXT_COLOR,
             hover_color=MATRIX_HOVER,
-            font=ctk.CTkFont(family="Courier New", size=12),
-            command=lambda: self.copy_to_clipboard(proxy['server'], "SERVER")
+            font=ctk.CTkFont(family="Courier New", size=12)
         )
+        # Привязываем команду после создания, чтобы передать саму кнопку (widget)
+        btn_server.configure(command=lambda b=btn_server: self.copy_to_clipboard(proxy['server'], "SERVER", b))
         btn_server.pack(side="left", fill="x", expand=True, padx=(0, 5))
 
         # 2. Кнопка порта
@@ -258,9 +273,9 @@ class MTProtoApp(ctk.CTk):
             border_width=1,
             text_color=TEXT_COLOR,
             hover_color=MATRIX_HOVER,
-            font=ctk.CTkFont(family="Courier New", size=12),
-            command=lambda: self.copy_to_clipboard(proxy['port'], "PORT")
+            font=ctk.CTkFont(family="Courier New", size=12)
         )
+        btn_port.configure(command=lambda b=btn_port: self.copy_to_clipboard(proxy['port'], "PORT", b))
         btn_port.pack(side="left", padx=(0, 5))
 
         # 3. Кнопка секрета
@@ -273,9 +288,9 @@ class MTProtoApp(ctk.CTk):
             border_width=1,
             text_color=TEXT_COLOR,
             hover_color=MATRIX_HOVER,
-            font=ctk.CTkFont(family="Courier New", size=12),
-            command=lambda: self.copy_to_clipboard(proxy['secret'], "SECRET")
+            font=ctk.CTkFont(family="Courier New", size=12)
         )
+        btn_secret.configure(command=lambda b=btn_secret: self.copy_to_clipboard(proxy['secret'], "SECRET", b))
         btn_secret.pack(side="right")
 
     def start_checking(self):
