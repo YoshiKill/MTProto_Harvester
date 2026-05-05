@@ -11,10 +11,9 @@
 Если утилита оказалась полезной и хочется поддержать:
 
 👌 Поддержать штаны за 40 грн
-
-https://www.donationalerts.com/r/hdd40gb
-
+https://www.donationalerts.com/r/hdd40gb 
 https://next.privat24.ua/send/ggbi5
+
 ---
 
 ## ⚙️ Что делает утилита
