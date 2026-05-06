@@ -34,6 +34,37 @@
 3. Вставить его в настройки клиента
 
 ---
+## 🐧 Запуск на Linux
+
+Во избежание ошибок конфликта пакетов (PEP 668), скрипт необходимо запускать через виртуальное окружение.
+
+### 1. Подготовка системы
+Убедитесь, что установлен Python 3 и библиотека Tkinter:
+* **Debian / Ubuntu:** `sudo apt install python3 python3-venv python3-tk`
+* **Arch / CachyOS:** `sudo pacman -S python python-pip tk`
+
+### 2. Установка и первый запуск
+Откройте терминал в папке со скриптом и выполните:
+
+```bash
+# Создаем изолированную среду
+python3 -m venv env
+
+### Активируем её (если используете Fish shell, пишите: source env/bin/activate.fish)
+source env/bin/activate
+
+### Ставим нужные библиотеки
+pip install customtkinter requests
+
+# Запускаем сканер
+python MTProto_Harvester.py
+🚀 Последующие запуски
+Вам больше не нужно ничего скачивать. Просто активируйте среду и запускайте:
+
+Bash
+source env/bin/activate
+python MTProto_Harvester.py
+---
 
 ## 🖱️ Удобство
 
