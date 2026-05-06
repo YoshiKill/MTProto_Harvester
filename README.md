@@ -49,21 +49,27 @@
 ```bash
 # Создаем изолированную среду
 python3 -m venv env
+```
 
 ### Активируем её (если используете Fish shell, пишите: source env/bin/activate.fish)
+```bash
 source env/bin/activate
-
+```
 ### Ставим нужные библиотеки
+```bash
 pip install customtkinter requests
-
+```
 # Запускаем сканер
+```bash
 python MTProto_Harvester.py
+```
 🚀 Последующие запуски
 Вам больше не нужно ничего скачивать. Просто активируйте среду и запускайте:
 
-Bash
+```bash
 source env/bin/activate
 python MTProto_Harvester.py
+```
 ---
 
 ## 🖱️ Удобство
