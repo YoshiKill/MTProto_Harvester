@@ -1,10 +1,28 @@
 import tkinter as tk
 import customtkinter as ctk
 import requests
-import socket
 import threading
 import concurrent.futures
+import asyncio
+import logging
+import sys
+import gc  # Импортируем сборщик мусора
 from urllib.parse import urlparse, parse_qs
+
+# ОПТИМИЗАЦИЯ ДЛЯ WINDOWS:
+# Отключаем ProactorEventLoop, который вешает GIL при закрытии сокетов в многопоточности.
+# Это уберет зависания интерфейса при переключении окон после сканирования.
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+# Импорты для имитации реального клиента Telegram
+from telethon import TelegramClient
+from telethon.sessions import MemorySession
+from telethon.network import ConnectionTcpMTProxyRandomizedIntermediate
+
+# Глушим технические логи Telethon, чтобы не спамить в консоль
+logging.getLogger('telethon').setLevel(logging.CRITICAL)
+logging.getLogger('asyncio').setLevel(logging.CRITICAL)
 
 # Настройки стиля "Matrix"
 MATRIX_GREEN = "#00FF41"
@@ -35,7 +53,7 @@ class MTProtoApp(ctk.CTk):
         # Заголовок
         self.label_title = ctk.CTkLabel(
             self, 
-            text="[ Down_the_proxies_Rabbit_Hole 🕳️🐇 v1.01 ]", 
+            text="[ Down_the_proxies_Rabbit_Hole 🕳️🐇 v1.09 ]", 
             font=ctk.CTkFont(family="Courier New", size=26, weight="bold"),
             text_color=MATRIX_GREEN
         )
@@ -116,7 +134,6 @@ class MTProtoApp(ctk.CTk):
         )
 
         # === ПАСХАЛКА / ВОТЕРМАРКА ===
-        # Используем place, чтобы прикрепить её ровно в правый нижний угол
         self.watermark_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.watermark_frame.place(relx=1.0, rely=1.0, anchor="se", x=-15, y=-10)
 
@@ -131,18 +148,16 @@ class MTProtoApp(ctk.CTk):
         self.wm_label2 = ctk.CTkLabel(
             self.watermark_frame,
             text="[With love for free net by HDD40gb]",
-            text_color="#00AA33", # Чуть более темный зеленый для акцента
+            text_color="#00AA33", 
             font=ctk.CTkFont(family="Courier New", size=10)
         )
         self.wm_label2.pack(anchor="e", pady=(0, 0))
 
     def on_closing(self):
-        """Безопасное закрытие приложения и остановка потоков"""
         self.stop_event.set()
         self.destroy()
 
     def toggle_logs(self):
-        """Показать/скрыть окно логов"""
         if self.log_visible:
             self.log_box.pack_forget()
             self.log_visible = False
@@ -151,25 +166,20 @@ class MTProtoApp(ctk.CTk):
             self.log_visible = True
 
     def log(self, message):
-        """Потокобезопасное добавление сообщений в лог"""
         self.after(0, self._append_log, message)
 
     def _append_log(self, message):
-        """Внутренний метод для отрисовки лога"""
         self.log_box.configure(state="normal")
         self.log_box.insert("end", f"{message}\n")
         self.log_box.configure(state="disabled")
         self.log_box.see("end")
 
     def update_status(self, text):
-        """Безопасное обновление статуса из любых потоков"""
         self.status_label.configure(text=f"> {text}")
 
     def parse_proxy_link(self, link):
-        """Извлекает сервер, порт и секрет из ссылки"""
         try:
             link = link.strip()
-            # Поддержка обоих форматов ссылок
             if "t.me/proxy" in link:
                 query = link.split('?')[1] if '?' in link else ''
             else:
@@ -182,8 +192,8 @@ class MTProtoApp(ctk.CTk):
             port_str = params.get('port', [0])[0]
             secret = params.get('secret', [None])[0]
 
-            if not server or not port_str:
-                self.log(f"[WARN] Failed to extract server/port from: {link}")
+            if not server or not port_str or not secret:
+                self.log(f"[WARN] Failed to extract server/port/secret from: {link}")
                 return None
                 
             return {
@@ -197,36 +207,58 @@ class MTProtoApp(ctk.CTk):
             return None
 
     def check_connection(self, proxy):
-        """TCP-пинг порта сервера"""
-        if not proxy or not proxy.get('server') or not proxy.get('port'):
+        """ УЛЬТИМАТИВНАЯ ПРОВЕРКА ЧЕРЕЗ TELETHON """
+        if not proxy:
             return None
             
         server = proxy['server']
         port = proxy['port']
+        secret = proxy['secret']
         
+        async def _test_telethon():
+            api_id = 4
+            api_hash = '014b35b6184100b085b0d0572f9b5103'
+            
+            client = TelegramClient(
+                MemorySession(),
+                api_id,
+                api_hash,
+                proxy=(server, port, secret),
+                connection=ConnectionTcpMTProxyRandomizedIntermediate
+            )
+            
+            try:
+                await asyncio.wait_for(client.connect(), timeout=5.0)
+                if client.is_connected():
+                    await client.disconnect()
+                    return proxy
+            except Exception:
+                pass
+            finally:
+                if client.is_connected():
+                    await client.disconnect()
+            
+            return None
+
         try:
-            # Создаем сокет, пытаемся подключиться. Таймаут 2.5 секунды
-            with socket.create_connection((server, port), timeout=2.5):
-                self.log(f"[+] ALIVE: {server}:{port} responded successfully.")
+            result = asyncio.run(_test_telethon())
+            if result:
+                self.log(f"[+] ALIVE (Verified by Telegram DC): {server}:{port}")
                 return proxy
-        except socket.timeout:
-            self.log(f"[-] TIMEOUT: {server}:{port} (No response in 2.5s)")
-            return None
-        except ConnectionRefusedError:
-            self.log(f"[-] REFUSED: {server}:{port} (Port closed/Connection refused)")
-            return None
-        except OSError as e:
+            else:
+                self.log(f"[-] DEAD (No route to Telegram): {server}:{port}")
+                return None
+        except Exception as e:
             self.log(f"[-] ERROR: {server}:{port} - {str(e)}")
             return None
 
     def copy_to_clipboard(self, text_to_copy, item_type, widget=None):
-        """Копирует переданный текст, показывает уведомление и красит кнопку в красный"""
         self.clipboard_clear()
         self.clipboard_append(str(text_to_copy))
+        
         self.copy_notify.configure(text=f"[ {item_type} SECURED IN CLIPBOARD ]", text_color=MATRIX_GREEN)
         self.after(2000, lambda: self.copy_notify.configure(text=""))
         
-        # Если передана кнопка, меняем её цвет на красный (маркируем как скопированную)
         if widget:
             widget.configure(
                 fg_color=COPIED_BG,
@@ -236,18 +268,22 @@ class MTProtoApp(ctk.CTk):
             )
 
     def add_proxy_widget(self, proxy):
-        """Добавляет рабочий прокси в UI-список с раздельными колонками"""
-        
-        # Создаем контейнер-строку для кнопок
-        row_frame = ctk.CTkFrame(self.result_frame, fg_color="transparent")
-        row_frame.pack(fill="x", pady=2, padx=5)
+        proxy_block = ctk.CTkFrame(
+            self.result_frame, 
+            fg_color="#080808", 
+            border_color=MATRIX_LOW_GREEN, 
+            border_width=1, 
+            corner_radius=4
+        )
+        proxy_block.pack(fill="x", pady=5, padx=5)
 
-        # Вычисляем визуально обрезанный секрет, чтобы не ломать ширину интерфейса
         secret_display = proxy['secret']
         if secret_display and len(secret_display) > 12:
             secret_display = secret_display[:10] + "..."
 
-        # 1. Кнопка сервера
+        row_frame = ctk.CTkFrame(proxy_block, fg_color="transparent")
+        row_frame.pack(fill="x", pady=(5, 0), padx=5)
+
         btn_server = ctk.CTkButton(
             row_frame,
             text=f"SRV: {proxy['server']}",
@@ -259,11 +295,9 @@ class MTProtoApp(ctk.CTk):
             hover_color=MATRIX_HOVER,
             font=ctk.CTkFont(family="Courier New", size=12)
         )
-        # Привязываем команду после создания, чтобы передать саму кнопку (widget)
         btn_server.configure(command=lambda b=btn_server: self.copy_to_clipboard(proxy['server'], "SERVER", b))
         btn_server.pack(side="left", fill="x", expand=True, padx=(0, 5))
 
-        # 2. Кнопка порта
         btn_port = ctk.CTkButton(
             row_frame,
             text=f"PORT: {proxy['port']}",
@@ -278,7 +312,6 @@ class MTProtoApp(ctk.CTk):
         btn_port.configure(command=lambda b=btn_port: self.copy_to_clipboard(proxy['port'], "PORT", b))
         btn_port.pack(side="left", padx=(0, 5))
 
-        # 3. Кнопка секрета
         btn_secret = ctk.CTkButton(
             row_frame,
             text=f"SEC: {secret_display}",
@@ -293,6 +326,31 @@ class MTProtoApp(ctk.CTk):
         btn_secret.configure(command=lambda b=btn_secret: self.copy_to_clipboard(proxy['secret'], "SECRET", b))
         btn_secret.pack(side="right")
 
+        lbl_or = ctk.CTkLabel(
+            proxy_block, 
+            text="[ OR FULL LINK ]", 
+            text_color="#008822", 
+            font=ctk.CTkFont(family="Courier New", size=10, weight="bold")
+        )
+        lbl_or.pack(pady=(2, 0))
+
+        full_https_link = f"https://t.me/proxy?server={proxy['server']}&port={proxy['port']}&secret={proxy['secret']}"
+        
+        display_full_link = full_https_link if len(full_https_link) < 85 else full_https_link[:82] + "..."
+
+        btn_full_link = ctk.CTkButton(
+            proxy_block,
+            text=display_full_link,
+            fg_color=MATRIX_LOW_GREEN,
+            border_color=MATRIX_HOVER,
+            border_width=1,
+            text_color=TEXT_COLOR,
+            hover_color=MATRIX_HOVER,
+            font=ctk.CTkFont(family="Courier New", size=11)
+        )
+        btn_full_link.configure(command=lambda b=btn_full_link: self.copy_to_clipboard(full_https_link, "FULL LINK", b))
+        btn_full_link.pack(fill="x", pady=(0, 5), padx=5)
+
     def start_checking(self):
         if self.is_checking:
             return
@@ -302,7 +360,6 @@ class MTProtoApp(ctk.CTk):
         self.active_count = 0
         self.btn_start.configure(state="disabled", text="SCANNING NETWORK...")
         
-        # Очищаем таблицу от старых результатов (и фреймы, и кнопки)
         for widget in self.result_frame.winfo_children():
             if isinstance(widget, (ctk.CTkButton, ctk.CTkFrame)):
                 widget.destroy()
@@ -313,7 +370,6 @@ class MTProtoApp(ctk.CTk):
 
         self.log("=== INITIATING MATRIX SCAN ===")
 
-        # Запускаем парсинг и проверку в фоновом потоке
         threading.Thread(target=self.process_workflow, daemon=True).start()
 
     def process_workflow(self):
@@ -322,14 +378,12 @@ class MTProtoApp(ctk.CTk):
             url = "https://raw.githubusercontent.com/SoliSpirit/mtproto/master/all_proxies.txt"
             self.log(f"[*] Fetching proxy list from: {url}")
             
-            # Скачиваем список с небольшим таймаутом
             response = requests.get(url, timeout=15)
             response.raise_for_status()
             
             lines = response.text.splitlines()
             self.log(f"[*] Fetched {len(lines)} lines from source.")
             
-            # Парсим ссылки (tg:// или https://t.me/proxy)
             raw_proxies = []
             for line in lines:
                 if line.startswith('tg://') or 't.me/proxy' in line:
@@ -345,11 +399,11 @@ class MTProtoApp(ctk.CTk):
                 self.after(0, self.update_status, "Scan aborted. 0 candidates found.")
                 return
 
-            self.after(0, self.update_status, f"Found {total_candidates} targets. Initiating TCP handshake protocol...")
-            self.log(f"[*] Starting concurrent checks with 60 workers...")
+            self.after(0, self.update_status, f"Found {total_candidates} targets. Initiating Telegram DC routing check...")
+            
+            self.log(f"[*] Starting concurrent checks with 25 workers...")
 
-            # Многопоточная проверка с динамическим добавлением
-            with concurrent.futures.ThreadPoolExecutor(max_workers=60) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
                 futures = {executor.submit(self.check_connection, p): p for p in raw_proxies}
                 checked = 0
                 
@@ -365,10 +419,12 @@ class MTProtoApp(ctk.CTk):
                         self.active_count += 1
                         self.after(0, self.add_proxy_widget, res)
                     
-                    # Обновляем прогресс каждые 5 проверенных прокси
                     if checked % 5 == 0 or checked == total_candidates:
                         status_msg = f"Scanning: {checked}/{total_candidates} | Alive nodes: {self.active_count}"
                         self.after(0, self.update_status, status_msg)
+
+                # Очищаем ссылки на объекты futures из памяти сразу после цикла
+                futures.clear()
 
             if not self.stop_event.is_set():
                 self.log(f"=== SCAN COMPLETE. {self.active_count} ALIVE NODES ===")
@@ -384,6 +440,16 @@ class MTProtoApp(ctk.CTk):
             if not self.stop_event.is_set():
                 self.is_checking = False
                 self.after(0, lambda: self.btn_start.configure(state="normal", text="RE-ENTER THE MATRIX"))
+            
+            # ОПТИМИЗАЦИЯ СБОРЩИКА МУСОРА (GC) ДЛЯ WINDOWS
+            # Принудительно очищаем память от сотен мертвых объектов Telethon и asyncio сокетов 
+            # прямо сейчас, в фоновом потоке, до того как пользователь начнет кликать по окну.
+            # Это полностью исключает зависание интерфейса при переключении на Telegram.
+            try:
+                raw_proxies.clear()
+                gc.collect()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     ctk.set_appearance_mode("dark")
