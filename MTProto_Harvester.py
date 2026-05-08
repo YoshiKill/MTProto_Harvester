@@ -7,6 +7,7 @@ import asyncio
 import logging
 import sys
 import gc  # Импортируем сборщик мусора
+import webbrowser
 from urllib.parse import urlparse, parse_qs
 
 # ОПТИМИЗАЦИЯ ДЛЯ WINDOWS:
@@ -149,9 +150,30 @@ class MTProtoApp(ctk.CTk):
             self.watermark_frame,
             text="[With love for free net by HDD40gb]",
             text_color="#00AA33", 
-            font=ctk.CTkFont(family="Courier New", size=10)
+            font=ctk.CTkFont(family="Courier New", size=10),
+            cursor="hand2"
         )
         self.wm_label2.pack(anchor="e", pady=(0, 0))
+        
+        # Биндим клик и эффекты наведения для второй вотермарки
+        self.wm_label2.bind("<Button-1>", lambda e: webbrowser.open_new("https://t.me/IDE_HDD40Gb"))
+        self.wm_label2.bind("<Enter>", lambda e: self.wm_label2.configure(text_color=MATRIX_GREEN))
+        self.wm_label2.bind("<Leave>", lambda e: self.wm_label2.configure(text_color="#00AA33"))
+
+        # === ДОНАТ / БЕЛЫЙ КРОЛИК ===
+        self.rabbit_label = ctk.CTkLabel(
+            self,
+            text="Follow the white rabbit...",
+            text_color="#00AA33",
+            font=ctk.CTkFont(family="Courier New", size=12, underline=True, weight="bold"),
+            cursor="hand2"
+        )
+        self.rabbit_label.place(relx=0.0, rely=1.0, anchor="sw", x=15, y=-10)
+        
+        # Биндим клик и эффекты наведения (подсветка матрицы)
+        self.rabbit_label.bind("<Button-1>", lambda e: webbrowser.open_new("https://www.donationalerts.com/r/hdd40gb"))
+        self.rabbit_label.bind("<Enter>", lambda e: self.rabbit_label.configure(text_color=MATRIX_GREEN))
+        self.rabbit_label.bind("<Leave>", lambda e: self.rabbit_label.configure(text_color="#00AA33"))
 
     def on_closing(self):
         self.stop_event.set()
