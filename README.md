@@ -57,7 +57,7 @@ source env/bin/activate
 ```
 ### Ставим нужные библиотеки
 ```bash
-pip install customtkinter requests
+pip install customtkinter requests telethon
 ```
 # Запускаем сканер
 ```bash
