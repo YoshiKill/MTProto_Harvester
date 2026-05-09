@@ -12,7 +12,6 @@ from urllib.parse import urlparse, parse_qs
 
 # ОПТИМИЗАЦИЯ ДЛЯ WINDOWS:
 # Отключаем ProactorEventLoop, который вешает GIL при закрытии сокетов в многопоточности.
-# Это уберет зависания интерфейса при переключении окон после сканирования.
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -21,7 +20,7 @@ from telethon import TelegramClient
 from telethon.sessions import MemorySession
 from telethon.network import ConnectionTcpMTProxyRandomizedIntermediate
 
-# Глушим технические логи Telethon, чтобы не спамить в консоль
+# Глушим технические логи Telethon
 logging.getLogger('telethon').setLevel(logging.CRITICAL)
 logging.getLogger('asyncio').setLevel(logging.CRITICAL)
 
@@ -33,16 +32,16 @@ MATRIX_HOVER = "#005F00"
 TEXT_COLOR = "#D1FFD6"
 
 # Цвета для скопированных элементов
-COPIED_BG = "#550000"     # Темно-красный фон
-COPIED_HOVER = "#770000"  # Красный фон при наведении
-COPIED_TEXT = "#FF8888"   # Светло-красный текст
+COPIED_BG = "#550000"     
+COPIED_HOVER = "#770000"  
+COPIED_TEXT = "#FF8888"   
 
 class MTProtoApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         self.title("Mproto_Harvester")
-        self.geometry("850x750")
+        self.geometry("850x780")
         self.configure(fg_color=MATRIX_DARK)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -50,17 +49,18 @@ class MTProtoApp(ctk.CTk):
         self.is_checking = False
         self.stop_event = threading.Event()
         self.active_count = 0
+        self.source_entries = []
 
         # Заголовок
         self.label_title = ctk.CTkLabel(
             self, 
-            text="[ Down_the_proxies_Rabbit_Hole 🕳️🐇 v1.09 ]", 
+            text="[ Down_the_proxies_Rabbit_Hole 🕳️🐇 v1.11 ]", 
             font=ctk.CTkFont(family="Courier New", size=26, weight="bold"),
             text_color=MATRIX_GREEN
         )
         self.label_title.pack(pady=(20, 10))
 
-        # Контейнер для элементов управления
+        # Контейнер для кнопки старта
         self.control_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.control_frame.pack(fill="x", padx=40)
 
@@ -78,14 +78,63 @@ class MTProtoApp(ctk.CTk):
         )
         self.btn_start.pack(expand=True, fill="x")
 
-        # Информационная панель
+        # === КОНТЕЙНЕР СТАТУСА И КНОПКИ PROXY LIST ===
+        self.status_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.status_container.pack(fill="x", padx=40, pady=(10, 5))
+
+        self.btn_toggle_sources = ctk.CTkButton(
+            self.status_container,
+            text="Proxy List 🥄",
+            command=self.toggle_sources,
+            fg_color=MATRIX_LOW_GREEN,
+            text_color=MATRIX_GREEN,
+            hover_color=MATRIX_HOVER,
+            font=ctk.CTkFont(family="Courier New", size=12, weight="bold"),
+            width=120,
+            height=28
+        )
+        self.btn_toggle_sources.pack(side="left")
+
         self.status_label = ctk.CTkLabel(
-            self, 
+            self.status_container, 
             text="> System Idle... Ready to initialize.", 
             text_color=MATRIX_GREEN,
             font=ctk.CTkFont(family="Courier New", size=13)
         )
-        self.status_label.pack(pady=(10, 5))
+        self.status_label.pack(side="left", expand=True)
+
+        # === ВЫПАДАЮЩЕЕ МЕНЮ ИСТОЧНИКОВ (Скрыто по умолчанию) ===
+        self.sources_visible = False
+        
+        # Создаем само меню, но пока НЕ упаковываем (не показываем) его.
+        # Идеальное решение, которое не оставляет пустых зазоров!
+        self.sources_frame = ctk.CTkFrame(self, fg_color="#080808", border_color=MATRIX_LOW_GREEN, border_width=1)
+        
+        self.sources_inner = ctk.CTkFrame(self.sources_frame, fg_color="transparent")
+        self.sources_inner.pack(fill="x", padx=10, pady=10)
+
+        self.btn_add_source = ctk.CTkButton(
+            self.sources_frame,
+            text="+ ADD SOURCE",
+            command=self.add_empty_source_row,
+            fg_color="transparent",
+            border_color=MATRIX_HOVER,
+            border_width=1,
+            text_color=MATRIX_GREEN,
+            hover_color=MATRIX_LOW_GREEN,
+            font=ctk.CTkFont(family="Courier New", size=12),
+            height=24
+        )
+        
+        # Добавляем встроенные источники по умолчанию
+        default_sources = [
+            "https://github.com/kort0881/telegram-proxy-collector/blob/main/proxy_all.txt",
+            "https://github.com/kort0881/telegram-proxy-collector/blob/main/proxy_ru.txt",
+            "https://github.com/SoliSpirit/mtproto/blob/master/all_proxies.txt",
+            "https://github.com/Grim1313/mtproto-for-telegram/blob/master/all_proxies.md"
+        ]
+        for src in default_sources:
+            self.add_source_row(src)
 
         # Список результатов (Scrollable Frame)
         self.result_frame = ctk.CTkScrollableFrame(
@@ -155,7 +204,6 @@ class MTProtoApp(ctk.CTk):
         )
         self.wm_label2.pack(anchor="e", pady=(0, 0))
         
-        # Биндим клик и эффекты наведения для второй вотермарки
         self.wm_label2.bind("<Button-1>", lambda e: webbrowser.open_new("https://t.me/IDE_HDD40Gb"))
         self.wm_label2.bind("<Enter>", lambda e: self.wm_label2.configure(text_color=MATRIX_GREEN))
         self.wm_label2.bind("<Leave>", lambda e: self.wm_label2.configure(text_color="#00AA33"))
@@ -170,10 +218,68 @@ class MTProtoApp(ctk.CTk):
         )
         self.rabbit_label.place(relx=0.0, rely=1.0, anchor="sw", x=15, y=-10)
         
-        # Биндим клик и эффекты наведения (подсветка матрицы)
         self.rabbit_label.bind("<Button-1>", lambda e: webbrowser.open_new("https://www.donationalerts.com/r/hdd40gb"))
         self.rabbit_label.bind("<Enter>", lambda e: self.rabbit_label.configure(text_color=MATRIX_GREEN))
         self.rabbit_label.bind("<Leave>", lambda e: self.rabbit_label.configure(text_color="#00AA33"))
+
+    def add_source_row(self, url=""):
+        """Добавляет новую строку для источника"""
+        row_idx = len(self.source_entries) + 1
+        row_frame = ctk.CTkFrame(self.sources_inner, fg_color="transparent")
+        row_frame.pack(fill="x", pady=2)
+        
+        lbl = ctk.CTkLabel(row_frame, text=f"{row_idx}.", text_color=MATRIX_GREEN, width=20)
+        lbl.pack(side="left", padx=(5, 5))
+        
+        entry = ctk.CTkEntry(
+            row_frame, 
+            fg_color="#050505", 
+            text_color=TEXT_COLOR, 
+            border_color=MATRIX_LOW_GREEN,
+            font=ctk.CTkFont(family="Courier New", size=11)
+        )
+        entry.insert(0, url)
+        entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        self.apply_context_menu(entry)
+        self.source_entries.append(entry)
+        
+        # Кнопка добавления всегда переезжает в самый низ
+        self.btn_add_source.pack_forget()
+        self.btn_add_source.pack(pady=(5, 10))
+
+    def add_empty_source_row(self):
+        self.add_source_row("")
+
+    def apply_context_menu(self, entry):
+        """Создает контекстное меню по правому клику для вставки текста"""
+        def show_menu(event):
+            menu = tk.Menu(self, tearoff=0, bg="#0A0A0A", fg=MATRIX_GREEN, activebackground=MATRIX_HOVER, activeforeground=TEXT_COLOR)
+            menu.add_command(label="Paste", command=lambda: paste_text())
+            
+            def paste_text():
+                try:
+                    text = self.clipboard_get()
+                    entry.insert("insert", text)
+                except tk.TclError:
+                    pass # Буфер обмена пуст
+                    
+            menu.tk_popup(event.x_root, event.y_root)
+            
+        entry.bind("<Button-3>", show_menu)
+
+    def toggle_sources(self):
+        """Показать/скрыть меню источников"""
+        if self.sources_visible:
+            # Полностью скрываем фрейм, пустой зазор исчезнет
+            self.sources_frame.pack_forget()
+            self.sources_visible = False
+            self.btn_toggle_sources.configure(fg_color=MATRIX_LOW_GREEN, text_color=MATRIX_GREEN)
+        else:
+            # Упаковываем фрейм СТРОГО ПОСЛЕ status_container
+            self.sources_frame.pack(fill="x", padx=40, pady=(0, 10), after=self.status_container)
+            self.sources_visible = True
+            self.btn_toggle_sources.configure(fg_color=MATRIX_HOVER, text_color=TEXT_COLOR)
 
     def on_closing(self):
         self.stop_event.set()
@@ -215,7 +321,6 @@ class MTProtoApp(ctk.CTk):
             secret = params.get('secret', [None])[0]
 
             if not server or not port_str or not secret:
-                self.log(f"[WARN] Failed to extract server/port/secret from: {link}")
                 return None
                 
             return {
@@ -225,7 +330,6 @@ class MTProtoApp(ctk.CTk):
                 'full_link': link
             }
         except Exception as e:
-            self.log(f"[ERROR] Parse exception for {link}: {str(e)}")
             return None
 
     def check_connection(self, proxy):
@@ -396,32 +500,57 @@ class MTProtoApp(ctk.CTk):
 
     def process_workflow(self):
         try:
-            self.after(0, self.update_status, "Downloading target list from mainframe...")
-            url = "https://raw.githubusercontent.com/SoliSpirit/mtproto/master/all_proxies.txt"
-            self.log(f"[*] Fetching proxy list from: {url}")
-            
-            response = requests.get(url, timeout=15)
-            response.raise_for_status()
-            
-            lines = response.text.splitlines()
-            self.log(f"[*] Fetched {len(lines)} lines from source.")
+            self.after(0, self.update_status, "Aggregating proxy lists from all sources...")
             
             raw_proxies = []
-            for line in lines:
-                if line.startswith('tg://') or 't.me/proxy' in line:
-                    parsed = self.parse_proxy_link(line)
-                    if parsed:
-                        raw_proxies.append(parsed)
-                        
-            total_candidates = len(raw_proxies)
-            self.log(f"[*] Successfully parsed {total_candidates} valid proxy links.")
+            seen_signatures = set() # Для удаления дубликатов
             
-            if total_candidates == 0:
-                self.log("[!] WARNING: No valid proxies found to check! Source might be empty or format changed.")
-                self.after(0, self.update_status, "Scan aborted. 0 candidates found.")
+            # Собираем все URL из активных полей
+            active_urls = [entry.get().strip() for entry in self.source_entries if entry.get().strip()]
+            
+            if not active_urls:
+                self.log("[!] No proxy sources provided.")
+                self.after(0, self.update_status, "Scan aborted. No sources.")
                 return
 
-            self.after(0, self.update_status, f"Found {total_candidates} targets. Initiating Telegram DC routing check...")
+            for url in active_urls:
+                # Умная конвертация Github ссылок в Raw-формат
+                clean_url = url
+                if "github.com" in clean_url and "/blob/" in clean_url:
+                    clean_url = clean_url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+                
+                self.log(f"[*] Fetching from: {clean_url}")
+                try:
+                    response = requests.get(clean_url, timeout=10)
+                    response.raise_for_status()
+                    
+                    lines = response.text.splitlines()
+                    source_count = 0
+                    
+                    for line in lines:
+                        if line.startswith('tg://') or 't.me/proxy' in line:
+                            parsed = self.parse_proxy_link(line)
+                            if parsed:
+                                # Уникальная сигнатура (чтобы не проверять один и тот же сервер дважды)
+                                signature = f"{parsed['server']}:{parsed['port']}:{parsed['secret']}"
+                                if signature not in seen_signatures:
+                                    seen_signatures.add(signature)
+                                    raw_proxies.append(parsed)
+                                    source_count += 1
+                                    
+                    self.log(f"    -> Found {source_count} unique valid links.")
+                except Exception as e:
+                    self.log(f"[WARN] Failed to fetch {clean_url}: {str(e)}")
+
+            total_candidates = len(raw_proxies)
+            self.log(f"[*] Successfully aggregated {total_candidates} total unique candidates.")
+            
+            if total_candidates == 0:
+                self.log("[!] WARNING: No valid proxies found in any source!")
+                self.after(0, self.update_status, "Scan aborted. 0 candidates aggregated.")
+                return
+
+            self.after(0, self.update_status, f"Found {total_candidates} unique targets. Initiating Telegram DC routing check...")
             
             self.log(f"[*] Starting concurrent checks with 25 workers...")
 
@@ -445,16 +574,12 @@ class MTProtoApp(ctk.CTk):
                         status_msg = f"Scanning: {checked}/{total_candidates} | Alive nodes: {self.active_count}"
                         self.after(0, self.update_status, status_msg)
 
-                # Очищаем ссылки на объекты futures из памяти сразу после цикла
                 futures.clear()
 
             if not self.stop_event.is_set():
                 self.log(f"=== SCAN COMPLETE. {self.active_count} ALIVE NODES ===")
                 self.after(0, self.update_status, f"Scan complete. {self.active_count} nodes are successfully validated.")
             
-        except requests.exceptions.RequestException as e:
-            self.log(f"[FATAL] Network Error: Unable to fetch target list. Details: {str(e)}")
-            self.after(0, self.update_status, f"Network Error: Unable to fetch target list.")
         except Exception as e:
             self.log(f"[FATAL] System Error: {str(e)}")
             self.after(0, self.update_status, f"System Error: {str(e)}")
@@ -463,12 +588,9 @@ class MTProtoApp(ctk.CTk):
                 self.is_checking = False
                 self.after(0, lambda: self.btn_start.configure(state="normal", text="RE-ENTER THE MATRIX"))
             
-            # ОПТИМИЗАЦИЯ СБОРЩИКА МУСОРА (GC) ДЛЯ WINDOWS
-            # Принудительно очищаем память от сотен мертвых объектов Telethon и asyncio сокетов 
-            # прямо сейчас, в фоновом потоке, до того как пользователь начнет кликать по окну.
-            # Это полностью исключает зависание интерфейса при переключении на Telegram.
             try:
                 raw_proxies.clear()
+                seen_signatures.clear()
                 gc.collect()
             except Exception:
                 pass
