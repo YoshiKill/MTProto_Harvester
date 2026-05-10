@@ -57,9 +57,14 @@
 
 ### 1. Подготовка системы
 Убедитесь, что установлен Python 3 и библиотека Tkinter:
-* **Debian / Ubuntu:** `sudo apt install python3 python3-venv python3-tk`
-* **Arch / CachyOS:** `sudo pacman -S python python-pip tk`
-
+* **Debian / Ubuntu:** `
+```bash
+sudo apt install python3 python3-venv python3-tk`
+```
+* **Arch / CachyOS:** `
+```bash
+sudo pacman -S python python-pip tk`
+```
 ### 2. Установка и первый запуск
 Откройте терминал в папке со скриптом и выполните:
 
@@ -69,9 +74,14 @@ python3 -m venv env
 ```
 
 ### Активируем её (если используете Fish shell, пишите: source env/bin/activate.fish)
+* **Debian / Ubuntu:** `
 ```bash
 source env/bin/activate
 ```
+* **Arch / CachyOS:** `
+```bash
+source env/bin/activate.fish
+``` 
 ### Ставим нужные библиотеки
 ```bash
 pip install customtkinter requests telethon
