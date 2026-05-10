@@ -61,7 +61,7 @@ class MTProtoApp(ctk.CTk):
         # Заголовок
         self.label_title = ctk.CTkLabel(
             self, 
-            text="[ Down_the_proxies_Rabbit_Hole 🕳️🐇 v1.14 ]", 
+            text="[ Down_the_proxies_Rabbit_Hole 🕳️🐇 v1.17 ]", 
             font=ctk.CTkFont(family="Courier New", size=26, weight="bold"),
             text_color=MATRIX_GREEN
         )
@@ -100,7 +100,7 @@ class MTProtoApp(ctk.CTk):
         )
         self.btn_toggle_sources.pack(side="left")
 
-        # Добавляем невидимый блок-пустышку справа для баланса, чтобы текст встал ровно по центру окна
+        # Добавляем невидимый блок-пустышку справа для баланса
         self.dummy_balance = ctk.CTkFrame(self.status_container, width=120, height=28, fg_color="transparent")
         self.dummy_balance.pack(side="right")
 
@@ -213,65 +213,116 @@ class MTProtoApp(ctk.CTk):
 
     def parse_proxy_link(self, text):
         try:
+            text = text.strip()
+            # 1. Пытаемся найти стандартный формат ссылки tg:// или t.me/
             match = re.search(r'(tg://proxy\?|t\.me/proxy\?)[^\s|\"|\'|\]|>|\|]+', text)
-            if not match: return None
-            link = match.group(0).strip().rstrip('|').rstrip(']')
-            parsed = urlparse(link.replace('tg://', 'http://'))
-            params = parse_qs(parsed.query)
-            srv = params.get('server', [None])[0]
-            prt = params.get('port', [None])[0]
-            sec = params.get('secret', [None])[0]
-            if srv and prt and sec:
+            if match:
+                link = match.group(0).strip().rstrip('|').rstrip(']')
+                parsed = urlparse(link.replace('tg://', 'http://'))
+                params = parse_qs(parsed.query)
+                srv = params.get('server', [None])[0]
+                prt = params.get('port', [None])[0]
+                sec = params.get('secret', [None])[0]
+                if srv and prt and sec:
+                    return {'server': srv.strip(), 'port': int(prt.strip()), 'secret': sec.strip(), 'full_link': link}
+            
+            # 2. Пытаемся найти сырой формат IP:PORT:SECRET (используется в proxy_ru.txt)
+            match_plain = re.search(r'([\w\.-]+):(\d+):([a-zA-Z0-9_-]{32,})', text)
+            if match_plain:
+                srv, prt, sec = match_plain.groups()
+                link = f"https://t.me/proxy?server={srv}&port={prt}&secret={sec}"
                 return {'server': srv.strip(), 'port': int(prt.strip()), 'secret': sec.strip(), 'full_link': link}
+                
         except Exception: pass
         return None
 
     def check_connection(self, proxy):
-        """Улучшенная проверка (устранение ошибок Event loop и GeneratorExit)"""
         if not proxy: return None
         
+        is_fake_tls = proxy['secret'].lower().startswith('ee')
+        proxy['is_fake_tls'] = is_fake_tls
+
+        # ПРОВЕРКА 1: ДЛЯ СТАРЫХ ПРОКСИ ЧЕРЕЗ TELETHON
         async def _test_telethon():
             client = None
             try:
-                # Используем API ID/Hash от Telegram Desktop
                 client = TelegramClient(MemorySession(), 4, '014b35b6184100b085b0d0572f9b5103',
                     proxy=(proxy['server'], proxy['port'], proxy['secret']),
                     connection=ConnectionTcpMTProxyRandomizedIntermediate)
                 
-                # Попытка подключения
-                await asyncio.wait_for(client.connect(), timeout=7.0)
+                await asyncio.wait_for(client.connect(), timeout=10.0)
                 
                 if client.is_connected():
-                    self.log(f"[+] ALIVE: {proxy['server']}:{proxy['port']}")
+                    self.log(f"[+] ALIVE (Standard): {proxy['server']}:{proxy['port']}")
                     await client.disconnect()
                     return proxy
                 else:
-                    self.log(f"[-] DEAD (No Route): {proxy['server']}:{proxy['port']}")
+                    self.log(f"[-] DEAD (Standard - No Route): {proxy['server']}:{proxy['port']}")
             except asyncio.TimeoutError:
                 self.log(f"[-] TIMEOUT: {proxy['server']}:{proxy['port']}")
             except Exception as e:
-                self.log(f"[-] FAILED: {proxy['server']}:{proxy['port']} ({str(e)})")
+                self.log(f"[-] FAILED: {proxy['server']}:{proxy['port']} ({type(e).__name__})")
             finally:
                 if client:
-                    try:
-                        # Гарантируем закрытие сокетов перед уничтожением цикла
-                        await client.disconnect()
+                    try: await client.disconnect()
                     except Exception: pass
             return None
 
+        # ПРОВЕРКА 2: КАСТОМНЫЙ FAKE-TLS (ДЛЯ СОВРЕМЕННЫХ EE-ПРОКСИ)
+        # Telethon не умеет слать TLS Hello, поэтому умные прокси его сбрасывают (readexactly error).
+        # Мы посылаем настоящий TLS пакет вручную.
+        async def _test_fake_tls():
+            try:
+                # Открываем сокет с таймаутом
+                reader, writer = await asyncio.wait_for(asyncio.open_connection(proxy['server'], proxy['port']), timeout=7.0)
+                
+                # Имитируем начало HTTPS соединения (TLS 1.2 Client Hello).
+                # Fake-TLS серверы ждут именно этого. Если послать мусор, они мгновенно разорвут связь.
+                tls_hello = bytes.fromhex("16030100a5010000a10303") + b"A"*32 + bytes.fromhex("00000000000201000055") + b"B"*85
+                writer.write(tls_hello)
+                await writer.drain()
+                
+                try:
+                    # Ждем реакции сервера. Если он отвечает ServerHello или просто держит порт открытым - он жив.
+                    data = await asyncio.wait_for(reader.read(1024), timeout=2.0)
+                except asyncio.TimeoutError:
+                    pass # Таймаут чтения значит, что сервер держит соединение (Alive!)
+                
+                writer.close()
+                try: await writer.wait_closed()
+                except Exception: pass
+                    
+                self.log(f"[+] ALIVE (Fake-TLS Verified): {proxy['server']}:{proxy['port']}")
+                return proxy
+            except Exception as e:
+                self.log(f"[-] DEAD (Fake-TLS Drop): {proxy['server']}:{proxy['port']} ({type(e).__name__})")
+                return None
+
+        # ЗАПУСК ИЗОЛИРОВАННОГО СОБЫТИЙНОГО ЦИКЛА
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = None
         try:
-            # Создаем изолированную петлю событий для потока
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(_test_telethon())
-            
-            # Важный хак: даем время на завершение фоновых задач asyncio перед закрытием
-            loop.run_until_complete(asyncio.sleep(0.1))
-            loop.close()
-            return result
+            if is_fake_tls:
+                result = loop.run_until_complete(_test_fake_tls())
+            else:
+                result = loop.run_until_complete(_test_telethon())
         except Exception as e:
             self.log(f"[ERROR] Thread Exception: {str(e)}")
-            return None
+        finally:
+            try:
+                # ИДЕАЛЬНАЯ ОЧИСТКА МУСОРА ASYNCIO
+                # Останавливаем все фоновые задачи, чтобы избавиться от спама "Event loop is closed"
+                tasks = asyncio.all_tasks(loop)
+                for task in tasks:
+                    task.cancel()
+                if tasks:
+                    loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.close()
+            except Exception: pass
+            
+        return result
 
     def copy_to_clipboard(self, text_to_copy, item_type, widget=None):
         self.clipboard_clear()
@@ -299,6 +350,11 @@ class MTProtoApp(ctk.CTk):
         btn_sec = ctk.CTkButton(row_frame, text=f"SEC: {secret_display}", width=130, fg_color=MATRIX_LOW_GREEN, border_width=1, text_color=TEXT_COLOR, hover_color=MATRIX_HOVER)
         btn_sec.configure(command=lambda b=btn_sec: self.copy_to_clipboard(proxy['secret'], "SECRET", b))
         btn_sec.pack(side="right")
+
+        # Маркировка для старых прокси (не Fake-TLS)
+        if not proxy.get('is_fake_tls', True):
+            warn_lbl = ctk.CTkLabel(proxy_block, text="[ NOT FOR RUSSIA (Standard Protocol) ]", text_color="#FF4444", font=ctk.CTkFont(family="Courier New", size=10, weight="bold"))
+            warn_lbl.pack(pady=(2, 0))
         
         ctk.CTkLabel(proxy_block, text="[ OR FULL LINK ]", text_color="#008822", font=ctk.CTkFont(family="Courier New", size=10, weight="bold")).pack()
         full_l = f"https://t.me/proxy?server={proxy['server']}&port={proxy['port']}&secret={proxy['secret']}"
@@ -382,8 +438,6 @@ class MTProtoApp(ctk.CTk):
         finally:
             self.is_checking = False
             self.after(0, lambda: self.btn_start.configure(state="normal", text="RE-ENTER THE MATRIX"))
-            # Сборщик мусора теперь вызывается ОДИН РАЗ после завершения всех потоков
-            # Это предотвратит ошибки GeneratorExit во время активной проверки
             gc.collect()
 
 if __name__ == "__main__":
